@@ -1,0 +1,275 @@
+---
+title: "Reproducible Research Project 2"
+author: "Tracy Wormwood"
+date: "2024-06-10"
+output: html_document
+---
+
+# Analysis of health and monetary impacts of weather events in USA from 1950-2011.
+
+## Synopsis
+The data analyzed in this report was extracted from the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. The data collected details fatalities and injuries to humans, as well as crop and property damage for more than 900,000 weather events over a time period of 60 years in the United States.
+In order to determine which weather phenomena have been most harmful to human health, the total injuries and fatalities for each weather event type were calculated, and the event types with the highest sums are reported. To determine which weather phenomena were most costly, the total costs of crop and property damages were calculated and the event types with the highest sums are reported here. 
+
+## Data Processing
+
+### Download and impact on health 
+
+Data can be downloaded from a bzip file. The csv is extracted upon download automatically.
+
+```{r}
+fileUrl<-"https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+download.file(fileUrl, destfile="/Users/Tracy/Desktop/RR Project 2/data.csv")
+```
+
+Next, the data is read into R. To investigate the weather events that are most harmful to human health (Question 1), the dataset will be cropped to only include the variables event type, fatalities and injuries.
+
+```{r}
+data<-read.csv("./data.csv")
+library(dplyr)
+health<-select(data, EVTYPE, FATALITIES, INJURIES)
+event_cat<-unique(health$EVTYPE)
+table_event<-table(health$EVTYPE)
+table_event<-as.data.frame(table_event)
+```
+
+Next, the sum of fatalities and injuries for each event type are calculated 
+using tapply:
+
+```{r}
+sum_fatal<-tapply(health$FATALITIES, health$EVTYPE, sum)
+sum_fatal<-as.data.frame(sum_fatal)
+sum_fatal$evtype<-table_event$Var1
+
+
+sum_injury<-tapply(health$INJURIES, health$EVTYPE, sum)
+sum_injury<-as.data.frame(sum_injury)
+sum_injury$evtype<-table_event$Var1
+```
+
+After those sums are calculated, the top ten event causes for both injuries and fatalities are reported, and then intersect() can be used to find which event types are in common between the two datasets (injury and fatality).
+
+```{r}
+sum_fatal_num<-filter(sum_fatal, sum_fatal>0)
+sum_injury_num<-filter(sum_injury, sum_injury>0)
+
+order_fatal<-sum_fatal[with(sum_fatal, order(-sum_fatal)),]
+top_10_fatal<-order_fatal[1:10,]
+
+order_inj<-sum_injury[with(sum_injury, order(-sum_injury)),]
+top_10_injury<-order_inj[1:10,]
+
+common<-intersect(top_10_fatal$evtype, top_10_injury$evtype)
+common
+```
+
+### Processing for economic impact 
+
+In order to process data to answer question 2, only the required variables are kept in the dataset. These are event type, property damage, property damage exponent, crop damage, and crop damage exponent. The values listed for property damage exponent appear to be confusing so this will be investigated here.
+
+```{r}
+damage<-select(data, EVTYPE, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)
+
+table(damage$PROPDMGEXP)
+```
+
+The PROPDMGEXP value is supposed to be in K (1000), M (1000000), or B (1000000000),according to the Storm Data Prep file. However, as shown in the code chunk above, different values are also input in this column. Some, the numbers, could be exponents, however the majority of the values are in K, M, or B. Do those labeled with "?" have a property damage numeric value?
+
+```{r}
+filter(damage, PROPDMGEXP=="?")
+```
+
+All of these rows have "0" value for property damage. These can be filtered out. 
+Additionally, do those labeled with "+" for the property damage exponent have a value?
+
+```{r}
+filter(damage, PROPDMGEXP=="+")
+```
+
+Here, the five rows with a "+" do have a numeric value. I'm going to read the notes from a few  of these cases, but first an index must be added to the damage data frame so the case can be easily looked up from the data data frame. 
+
+```{r}
+damage$index<-seq.int(nrow(damage))
+plus<-filter(damage, PROPDMGEXP=="+")
+```
+
+The case notes from index=188780:
+
+```{r}
+data[188780,]
+```
+
+The property damage value is 20, and the exponent is "+". From reading the notes it's not clear how the number 20 was determined. To make this analysis simpler, the damage data frame will be filtered to only include cases which have a K, M, or B for the property damage exponent value. The same will also be applied for crop damage exponent values. Then, lowercase values will be converted to uppercase values.
+
+```{r}
+list<-c("K", "k", "M", "m", "B")
+damage_filter<-filter(damage, PROPDMGEXP %in% list | CROPDMGEXP %in% list)
+damage_filter$PROPDMGEXP2<-toupper(damage_filter$PROPDMGEXP)
+damage_filter$CROPDMGEXP2<-toupper(damage_filter$CROPDMGEXP)
+```
+
+The uppercase values were created in a new column. The old column will be 
+removed and the "new" column will be renamed. Additionally, there appear to be 
+some cases where there is a "K" value, but the number for damage is 0. These need to be removed as well (damage_filter_both).
+
+```{r}
+damage_filter<-select(damage_filter, EVTYPE, PROPDMG, PROPDMGEXP2, CROPDMG, CROPDMGEXP2, index)
+damage_filter<-rename(damage_filter, PROPDMGEXP=PROPDMGEXP2, CROPDMGEXP=CROPDMGEXP2)
+damage_filter_both<-filter(damage_filter, PROPDMG>0 | CROPDMG>0)
+```
+
+Now the damage values should be calculated in numeric form. The property or crop
+damage value should be multiplied by the "K", "M" or "B" value and should be 
+stored in a new column. This can be performed by writing two functions, multiplier_prop and multiplier_crop:
+
+```{r}
+multiplier_prop<-function(dataset) {
+    newdataset<-data.frame()
+    
+    for (i in 1:nrow(dataset))
+        if (dataset$PROPDMGEXP[[i]]=="K") {
+            newdataset<-rbind(newdataset, value=dataset$PROPDMG[[i]]*1000)}
+            
+            else if (dataset$PROPDMGEXP[[i]]=="M") {
+                newdataset<-rbind(newdataset, value=dataset$PROPDMG[[i]]*1000000)}
+        
+                else if (dataset$PROPDMGEXP[[i]]=="B") {
+                    newdataset<-rbind(newdataset, value=dataset$PROPDMG[[i]]*1000000000)}
+                    
+                    else newdataset<-rbind(newdataset, value=0)
+            
+    newdataset
+}
+
+
+
+multiplier_crop<-function(dataset) {
+    newdataset<-data.frame()
+    
+    for (i in 1:nrow(dataset))
+        if (dataset$CROPDMGEXP[[i]]=="K") {
+            newdataset<-rbind(newdataset, value=dataset$CROPDMG[[i]]*1000)}
+    
+    else if (dataset$PROPDMGEXP[[i]]=="M") {
+        newdataset<-rbind(newdataset, value=dataset$CROPDMG[[i]]*1000000)}
+    
+    else if (dataset$PROPDMGEXP[[i]]=="B") {
+        newdataset<-rbind(newdataset, value=dataset$CROPDMG[[i]]*1000000000)}
+    
+    else newdataset<-rbind(newdataset, value=0)
+    
+    newdataset
+}
+```
+
+Then, the output of these two functions was added to the damage_filter_both
+dataset. These are numeric values for property and crop damage.
+
+```{r}
+damage_filter_both$propertydamage<-multiplier_prop(damage_filter_both)
+damage_filter_both$cropdamage<-multiplier_crop(damage_filter_both)
+```
+
+After these values are calculated, tapply can be run to find the sum of 
+property/crop damages by event type. The two resulting data frames are summed in the dataset (both) to determine the total economic impact.
+
+```{r}
+prop_sum<-tapply(damage_filter_both$propertydamage, damage_filter_both$EVTYPE, sum)
+prop_sum<-as.data.frame(prop_sum)
+
+crop_sum<-tapply(damage_filter_both$cropdamage, damage_filter_both$EVTYPE, sum)
+crop_sum<-as.data.frame(crop_sum)
+
+both<-cbind(crop_sum, prop_sum)
+both$eventtype<-rownames(both)
+both$total<-(crop_sum+prop_sum)
+```
+
+As with human health, it would be interesting to find the top 10 event types regarding economic impact for both crop and property damage. It would also be interesting to know the sum of crop and property damages for event types and see which events are most costly.
+
+```{r}
+order_prop<-both[with(both, order(-prop_sum)),]
+top_10_prop<-order_prop[1:10,]
+
+order_crop<-both[with(both, order(-crop_sum)),]
+top_10_crop<-order_crop[1:10,]
+
+common_value<-intersect(top_10_crop$eventtype, top_10_prop$eventtype)
+common_value
+```
+
+
+Earlier the sum of crop and property damage (both$total) was calculated. Now
+these values can be ordered and the top ten can be reported. The sum calculated
+earlier is recorded as a dataframe so it must be transformed that to an object that can be ordered.
+
+```{r}
+str(both)
+total_value<-select(both, 3:4)
+str(total_value)
+total_value_2<-unlist(total_value$total)
+str(total_value_2)
+both$totalval<-cbind(total_value_2)
+order_total<-both[with(both, order(-totalval)),]
+top_10_total<-order_total[1:10,]
+
+top_10_total
+
+common_total<-intersect(top_10_total$eventtype, common_value)
+common_total
+```
+
+## Results
+
+### Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+
+The weather events that are most damaging to human health, considering fatalities and injuries, are `r common`. 
+
+The package ggplot2 is  used to create a bar graph showing the event types with the most fatalities and injuries.
+
+```{r}
+library(ggplot2)
+
+f<-ggplot(top_10_fatal, aes(x=evtype, y=sum_fatal))+geom_col(fill="pink")+geom_text(aes(label=evtype), size=2, vjust=-0.3)+ylab("Total fatalities")+xlab("Event type")+ggtitle("Weather events with most fatalities 1950-2011 (USA)")+theme(axis.text.x=element_blank(), axis.ticks = element_blank(), legend.position = "none")
+    
+i<-ggplot(top_10_injury, aes(x=evtype, y=sum_injury))+geom_col(fill="lightblue")+geom_text(aes(label=evtype), size=2, vjust=-0.3)+ylab("Total injuries")+xlab("Event type")+ggtitle("Weather events with most injuries 1950-2011 (USA)")+theme(axis.text.x=element_blank(), axis.ticks = element_blank(), legend.position = "none")
+
+library(patchwork)
+f/i
+
+png(filename = "Healthimpact.png", width=480, height=960)
+f/i
+dev.off()
+
+```
+The graph shows that tornadoes are by far the most harmful to human health.
+
+
+### Across the United States, which types of events have the greatest economic consequences?
+
+There are five event types in common for the most costly damages. These five are
+`r common_value`.
+
+Considering the total of property and crop damage, the most costly weather event
+types are `r common_total`.
+
+Finally, a plot will be created to summarize the investigation of question 2.
+
+```{r}
+library(data.table)
+top_10_t<-as.data.table(top_10_total)
+top_10_damage<-melt(top_10_t, id.vars=3, measure.vars=c(1,2))
+dam<-ggplot(top_10_damage, aes(x=eventtype, y=value, fill=variable))+geom_col()+theme(axis.text.x = element_text(size=7, angle=35))+labs(x="Weather event type", y="Total in USD", title="Economic Damages by Weather Event 1950-2011 (USA)")+scale_fill_discrete(name="Asset type", labels = c("Crop", "Property"))
+
+dam
+
+png(filename="Economicimpact.png", width=900, height=600)
+dam
+dev.off()
+```
+
+The crop damage incurred by hurricanes and typhoons is notably higher than the other weather event types. Floods have are costliest in terms of property damage.
+
+### Conclusion
+
+In summary, from 1950-2011 in the United States tornadoes were most harmful to human health, and hurricanes had the greatest economic consequences. 

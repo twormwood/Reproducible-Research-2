@@ -5,11 +5,11 @@ Peer-graded Assignment: Course Project 2
 
 **Analysis report available on RPubs**
 
-* <a href="https://rpubs.com/twormwood/1196542">Analysis of U.S. Storm Event Data and the Impact on Public Health and the Economy</a>
+* <a href="https://rpubs.com/twormwood/1196542">Analysis of health and monetary impacts of weather events in USA from 1950-2011</a>
 
 **Analysis report available on GitHub**
 
-* <a href="">Analysis of U.S. Storm Event Data and the Impact on Public Health and the Economy</a>
+* <a href="https://github.com/twormwood/Reproducible-Research-2">Analysis of health and monetary impacts of weather events in USA from 1950-2011</a>
 
 ## Introduction
 
